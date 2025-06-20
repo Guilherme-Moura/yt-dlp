@@ -1,4 +1,5 @@
 [coverage:run]
+parallel = true
 source = yt_dlp, devscripts
 omit = 
     */extractor/lazy_extractors.py

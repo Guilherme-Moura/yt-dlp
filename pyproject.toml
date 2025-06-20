@@ -166,7 +166,7 @@ dependencies = [
 
 [tool.hatch.envs.hatch-test.scripts]
 run = "python -m devscripts.run_tests {args}"
-run-cov = "python -m devscripts.run_coverage {args}"
+cov = "python -m devscripts.run_coverage {args}"
 
 [[tool.hatch.envs.hatch-test.matrix]]
 python = [

@@ -1,68 +1,36 @@
+# devscripts/run_coverage.py
 #!/usr/bin/env python3
-
-# Script to run coverage tests for yt-dlp
-#
-# Usage:
-#   python -m devscripts.run_coverage [test_path] [module_path] [additional pytest args]
-#
-# Examples:
-#   python -m devscripts.run_coverage                         # Test everything
-#   python -m devscripts.run_coverage test/devscripts         # Test devscripts
-#   python -m devscripts.run_coverage test/test_utils.py yt_dlp.utils  # Test specific module
-#   python -m devscripts.run_coverage test/test_utils.py "yt_dlp.utils,yt_dlp.YoutubeDL"  # Test multiple modules
-#   python -m devscripts.run_coverage test -v                 # With verbosity
-#
-# Using hatch:
-#   hatch run hatch-test:run-cov [args]                       # Same arguments as above
-#   hatch test --cover                                        # Run all tests with coverage
-#
-# Important:
-#   - Always run this script from the project root directory
-#   - Test paths are relative to the project root
-#   - Module paths use Python import syntax (with dots)
-#   - Coverage reports are generated in .coverage-reports/
 
 import sys
 import subprocess
 from pathlib import Path
 
-script_dir = Path(__file__).parent
-repo_root = script_dir.parent
-
+repo_root = Path(__file__).parent.parent
 
 def main():
     args = sys.argv[1:]
 
     if not args:
-        # Default to running all tests
         test_path = 'test'
         module_path = 'yt_dlp'
     elif len(args) == 1:
         test_path = args[0]
-        # Try to guess the module path from the test path
-        if test_path.startswith('test/'):
-            module_path = 'yt_dlp'
-        else:
-            module_path = 'yt_dlp'
+        module_path = 'yt_dlp'
     else:
         test_path = args[0]
         module_path = args[1]
 
-    # Initialize coverage reports directory
-    cov_dir = repo_root / '.coverage-reports'
-    cov_dir.mkdir(exist_ok=True)
-    html_dir = cov_dir / 'html'
-    html_dir.mkdir(exist_ok=True)
-
-    # Run pytest with coverage
+    # Comando para rodar pytest com coverage
+    # O coverage.py irá automaticamente criar arquivos de dados separados em modo paralelo
     cmd = [
         'python', '-m', 'pytest',
         f'--cov={module_path}',
         '--cov-config=.coveragerc',
-        '--cov-report=term-missing',
+        '--cov-report=',  # Desabilita o relatório de terminal aqui
         test_path,
     ]
 
+    # Adiciona argumentos extras do pytest se houver
     if len(args) > 2:
         cmd.extend(args[2:])
 
@@ -70,29 +38,9 @@ def main():
     print(f'Command: {" ".join(cmd)}')
 
     try:
-        result = subprocess.run(cmd, check=True)
-
-        # Generate reports after the test run in parallel
-        import concurrent.futures
-
-        def generate_html_report():
-            return subprocess.run([
-                'python', '-m', 'coverage', 'html',
-            ], check=True)
-
-        def generate_xml_report():
-            return subprocess.run([
-                'python', '-m', 'coverage', 'xml',
-            ], check=True)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            html_future = executor.submit(generate_html_report)
-            xml_future = executor.submit(generate_xml_report)
-            # Wait for both tasks to complete
-            concurrent.futures.wait([html_future, xml_future])
-
-        print(f'\nCoverage reports saved to {cov_dir.as_posix()}')
-        print(f'HTML report: {cov_dir.as_posix()}/html/index.html')
+        # Usamos --cov-append para garantir que as execuções não sobrescrevam os dados
+        # Adicione `parallel = true` ao seu .coveragerc na seção [run]
+        result = subprocess.run(cmd + ['--cov-append'], check=True)
         return result.returncode
     except subprocess.CalledProcessError as e:
         print(f'Error running coverage: {e}')

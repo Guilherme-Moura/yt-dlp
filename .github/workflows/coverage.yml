@@ -1,3 +1,5 @@
+# .github/workflows/coverage.yml
+
 name: Code Coverage
 
 on:
@@ -23,7 +25,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install pytest-cov
+          pip install pytest-cov coverage # Instalar coverage explicitamente
 
       - name: Run coverage tests in parallel
         run: |
@@ -35,13 +37,19 @@ jobs:
 
           def run_coverage(args):
               test_path, module_path = args
+              # Chama o script run_coverage que agora não gera mais relatórios
               cmd = ['python', '-m', 'devscripts.run_coverage', test_path, module_path]
               return subprocess.run(cmd, check=True)
 
+          # Lista de testes a serem executados em paralelo
           coverage_tests = [
               ('test/test_utils.py', 'yt_dlp.utils'),
               ('test/test_YoutubeDL.py', 'yt_dlp.YoutubeDL')
+              # Adicione mais testes aqui
           ]
+
+          # Limpa dados de cobertura antigos
+          subprocess.run(['coverage', 'erase'], check=True)
 
           with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
               futures = [executor.submit(run_coverage, test) for test in coverage_tests]
@@ -49,12 +57,19 @@ jobs:
                   try:
                       future.result()
                   except subprocess.CalledProcessError as e:
-                      print(f"Error running coverage: {e}")
+                      print(f"Error running parallel coverage job: {e}")
                       sys.exit(1)
           EOF
 
-          # Run the script
+          # Run the parallel test script
           python run_parallel_coverage.py
+
+      - name: Combine and Generate Reports
+        run: |
+          coverage combine
+          coverage report --show-missing
+          coverage html
+          coverage xml
 
       - name: Archive coverage results
         uses: actions/upload-artifact@v4
