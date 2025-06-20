@@ -4,16 +4,19 @@
 import os
 import sys
 import unittest
+from unittest.mock import PropertyMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
+import pytest
 import subprocess
+import re
 
 from yt_dlp import YoutubeDL
-from yt_dlp.utils import shell_quote
+from yt_dlp.utils import PostProcessingError, shell_quote
 from yt_dlp.postprocessor import (
     ExecPP,
+    FFmpegPostProcessor,
     FFmpegThumbnailsConvertorPP,
     MetadataFromFieldPP,
     MetadataParserPP,
@@ -21,6 +24,124 @@ from yt_dlp.postprocessor import (
     SponsorBlockPP,
 )
 
+DUMMY_FILE_PATH = '/path/to/video.mp4'
+
+class TestFFmpegGetAudioCodec:
+    """
+    Agrupa os testes unitários para o método FFmpegPostProcessor.get_audio_codec.
+    """
+
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=False)
+    @patch.object(FFmpegPostProcessor, 'available', new_callable=PropertyMock, return_value=False)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct1_no_ffmpeg_or_ffprobe(self, mock_get_param, mock_determine_exec, mock_available, mock_probe_available):
+        """CT1: Testa erro quando ffprobe e ffmpeg estão indisponíveis."""
+        with pytest.raises(PostProcessingError, match='ffprobe and ffmpeg not found'):
+            FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'executable', new_callable=PropertyMock, return_value='/bin/ffmpeg')
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=False)
+    @patch.object(FFmpegPostProcessor, 'available', new_callable=PropertyMock, return_value=True)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct2_ffmpeg_available_regex_match(self, mock_get_param, mock_determine_exec, mock_available, mock_probe_available, mock_executable, mock_popen_run):
+        """CT2: FFmpeg disponível, ffprobe indisponível, regex encontra o codec 'mp3'."""
+        mock_stderr = "Stream #0:0: Video: h264\nStream #0:1: Audio: mp3, 44100 Hz"
+        mock_popen_run.return_value = ('', mock_stderr, 1)
+
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+
+        assert result == 'mp3'
+        mock_popen_run.assert_called_once()
+
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'probe_executable', new_callable=PropertyMock, return_value='/bin/ffprobe')
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=True)
+    @patch.object(FFmpegPostProcessor, 'available', new_callable=PropertyMock, return_value=False)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct3_ffprobe_available_success(self, mock_get_param, mock_determine_exec, mock_available, mock_probe_available, mock_probe_exec, mock_popen_run):
+        """CT3: FFprobe disponível, encontra o codec 'aac' com sucesso."""
+        mock_stdout = "codec_name=aac\ncodec_type=audio\n"
+        mock_popen_run.return_value = (mock_stdout, '', 0)
+
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+
+        assert result == 'aac'
+        mock_popen_run.assert_called_once()
+
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'probe_executable', new_callable=PropertyMock, return_value='/bin/ffprobe')
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=True)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct4_ffprobe_no_codec_name_first(self, mock_get_param, mock_determine_exec, mock_probe_available, mock_probe_exec, mock_popen_run):
+        """CT4: FFprobe disponível, mas 'codec_type=audio' aparece antes de 'codec_name'."""
+        mock_stdout = "codec_type=audio\ncodec_name=opus\n"
+        mock_popen_run.return_value = (mock_stdout, '', 0)
+        
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+        assert result is None
+
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'probe_executable', new_callable=PropertyMock, return_value='/bin/ffprobe')
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=True)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct5_ffprobe_wrong_codec_type(self, mock_get_param, mock_determine_exec, mock_probe_available, mock_probe_exec, mock_popen_run):
+        """CT5: FFprobe disponível, 'codec_name' é seguido por 'codec_type=video'."""
+        mock_stdout = "codec_name=aac\ncodec_type=video\n"
+        mock_popen_run.return_value = (mock_stdout, '', 0)
+        
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+        assert result is None
+
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'executable', new_callable=PropertyMock, return_value='/bin/ffmpeg')
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=False)
+    @patch.object(FFmpegPostProcessor, 'available', new_callable=PropertyMock, return_value=True)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct6_ffmpeg_available_regex_no_match(self, mock_get_param, mock_determine_exec, mock_available, mock_probe_available, mock_executable, mock_popen_run):
+        """CT6: FFmpeg disponível, mas a saída não corresponde ao regex de áudio."""
+        mock_stderr = "Stream #0:0: Video: h264\nStream #0:1: Data: bin_data"
+        mock_popen_run.return_value = ('', mock_stderr, 1)
+
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+        assert result is None
+
+    @pytest.mark.parametrize("probe_is_avail, mock_return_code", [(True, 1), (False, 0)])
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'probe_executable', new_callable=PropertyMock)
+    @patch.object(FFmpegPostProcessor, 'executable', new_callable=PropertyMock)
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock)
+    @patch.object(FFmpegPostProcessor, 'available', new_callable=PropertyMock)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct7_unexpected_return_code(self, mock_get_param, mock_determine_exec, mock_available, mock_probe_available, mock_executable, mock_probe_exec, mock_popen_run, probe_is_avail, mock_return_code):
+        """CT7: Testa erro de 'returncode' inesperado para ffprobe e ffmpeg."""
+        mock_probe_available.return_value = probe_is_avail
+        mock_available.return_value = not probe_is_avail
+        mock_probe_exec.return_value = '/bin/ffprobe'
+        mock_executable.return_value = '/bin/ffmpeg'
+        mock_popen_run.return_value = ('', '', mock_return_code)
+
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+        assert result is None
+
+    @patch('yt_dlp.postprocessor.ffmpeg.Popen.run')
+    @patch.object(FFmpegPostProcessor, 'probe_executable', new_callable=PropertyMock, return_value='/bin/ffprobe')
+    @patch.object(FFmpegPostProcessor, 'probe_available', new_callable=PropertyMock, return_value=True)
+    @patch.object(FFmpegPostProcessor, '_determine_executables', return_value={})
+    @patch.object(FFmpegPostProcessor, 'get_param', return_value=True)
+    def test_ct8_os_error_on_execution(self, mock_get_param, mock_determine_exec, mock_probe_available, mock_probe_exec, mock_popen_run):
+        """CT8: Testa tratamento de erro quando Popen.run levanta OSError."""
+        mock_popen_run.side_effect = OSError("Comando não encontrado")
+
+        result = FFmpegPostProcessor(downloader=None).get_audio_codec(DUMMY_FILE_PATH)
+        assert result is None
 
 class TestMetadataFromField(unittest.TestCase):
 

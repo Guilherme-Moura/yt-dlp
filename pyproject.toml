@@ -80,6 +80,7 @@ static-analysis = [
 test = [
     "pytest~=8.1",
     "pytest-rerunfailures~=14.0",
+    "pytest-cov~=6.0",
 ]
 pyinstaller = [
     "pyinstaller>=6.13.0",  # Windows temp cleanup fixed in 6.13.0
@@ -159,12 +160,13 @@ lint-fix = "ruff check --fix {args:.}"
 features = ["test"]
 dependencies = [
     "pytest-randomly~=3.15",
+    "pytest-cov~=6.0",
     "pytest-xdist[psutil]~=3.5",
 ]
 
 [tool.hatch.envs.hatch-test.scripts]
 run = "python -m devscripts.run_tests {args}"
-run-cov = "echo Code coverage not implemented && exit 1"
+cov = "python -m devscripts.run_coverage {args}"
 
 [[tool.hatch.envs.hatch-test.matrix]]
 python = [
